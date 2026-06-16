@@ -4,9 +4,10 @@ import StatusPanel from '@/components/StatusPanel.vue'
 import ActionButtons from '@/components/ActionButtons.vue'
 import EventLog from '@/components/EventLog.vue'
 import GameOverModal from '@/components/GameOverModal.vue'
+import GameSummary from '@/components/GameSummary.vue'
 import { useGame } from '@/composables/useGame'
 
-const { state, highScore, canPerformAction, gatherWood, gatherStone, hunt, drink, restart } = useGame()
+const { state, highScore, highScoreRecord, currentGameSummary, canPerformAction, gatherWood, gatherStone, hunt, drink, restart } = useGame()
 
 const isNewRecord = computed(() => state.value.turn >= highScore.value && state.value.turn > 0)
 </script>
@@ -34,6 +35,12 @@ const isNewRecord = computed(() => state.value.turn >= highScore.value && state.
         <div class="bg-game-card/80 backdrop-blur px-6 py-3 rounded-xl border border-game-border">
           <span class="text-gray-400 text-sm">最高纪录</span>
           <p class="text-2xl font-bold text-yellow-400 tabular-nums">🏆 {{ highScore }}</p>
+        </div>
+      </div>
+
+      <div v-if="highScoreRecord?.summary" class="mb-8">
+        <div class="bg-game-card/60 backdrop-blur rounded-2xl p-6 border border-game-border">
+          <GameSummary :summary="highScoreRecord.summary" title="历史最佳纪录" :compact="true" />
         </div>
       </div>
 
@@ -77,6 +84,7 @@ const isNewRecord = computed(() => state.value.turn >= highScore.value && state.
       :final-turn="state.turn"
       :high-score="highScore"
       :is-new-record="isNewRecord"
+      :summary="currentGameSummary"
       @restart="restart"
     />
   </div>

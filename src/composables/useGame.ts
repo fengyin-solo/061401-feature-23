@@ -1,9 +1,10 @@
-import { ref, computed, watch } from 'vue'
-import type { GameState, LogEntry, RandomEvent, ActionType, ActionEffect } from '@/types/game'
+import { ref, computed } from 'vue'
+import type { GameState, LogEntry, RandomEvent, ActionType, ActionEffect, KeyMoment, GameSummary, HighScoreRecord, CauseOfDeath, ResourceSnapshot } from '@/types/game'
 import { randomEvents } from '@/data/events'
 
 const STORAGE_KEY_HIGH_SCORE = 'survival_game_high_score'
 const MAX_STAT = 100
+const MAX_KEY_MOMENTS = 8
 
 const actionEffects: Record<ActionType, ActionEffect> = {
   gatherWood: {
@@ -33,32 +34,66 @@ export function useGame() {
     turn: 0,
     isGameOver: false,
     logs: [],
+    resourceHistory: [],
+    keyMoments: [],
   })
 
-  const highScore = ref<number>(0)
+  const highScoreRecord = ref<HighScoreRecord | null>(null)
+  const currentGameSummary = ref<GameSummary | null>(null)
   let logIdCounter = 0
+  let keyMomentIdCounter = 0
 
   const canAct = computed(() => !state.value.isGameOver)
+  const highScore = computed(() => highScoreRecord.value?.turn ?? 0)
 
   function loadHighScore() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_HIGH_SCORE)
       if (saved) {
-        highScore.value = parseInt(saved, 10) || 0
+        const parsed = JSON.parse(saved)
+        if (parsed && typeof parsed === 'object' && 'turn' in parsed && 'summary' in parsed) {
+          highScoreRecord.value = parsed as HighScoreRecord
+        } else {
+          const legacyScore = parseInt(saved, 10) || 0
+          if (legacyScore > 0) {
+            highScoreRecord.value = {
+              turn: legacyScore,
+              summary: createLegacySummary(legacyScore),
+            }
+          }
+        }
       }
     } catch (e) {
-      highScore.value = 0
+      highScoreRecord.value = null
     }
   }
 
   function saveHighScore() {
-    if (state.value.turn > highScore.value) {
-      highScore.value = state.value.turn
+    if (!highScoreRecord.value || state.value.turn > highScoreRecord.value.turn) {
+      const summary = generateGameSummary()
+      currentGameSummary.value = summary
+      highScoreRecord.value = {
+        turn: state.value.turn,
+        summary,
+      }
       try {
-        localStorage.setItem(STORAGE_KEY_HIGH_SCORE, String(highScore.value))
+        localStorage.setItem(STORAGE_KEY_HIGH_SCORE, JSON.stringify(highScoreRecord.value))
       } catch (e) {
         // ignore
       }
+    } else {
+      currentGameSummary.value = generateGameSummary()
+    }
+  }
+
+  function createLegacySummary(turn: number): GameSummary {
+    return {
+      finalTurn: turn,
+      causeOfDeath: 'health_zero',
+      causeOfDeathText: '旧版记录 - 详细数据未保存',
+      keyMoments: [],
+      resourceHistory: [],
+      createdAt: Date.now(),
     }
   }
 
@@ -71,6 +106,92 @@ export function useGame() {
     })
     if (state.value.logs.length > 50) {
       state.value.logs.pop()
+    }
+  }
+
+  function addKeyMoment(type: KeyMoment['type'], text: string, icon: string) {
+    state.value.keyMoments.push({
+      id: ++keyMomentIdCounter,
+      turn: state.value.turn,
+      type,
+      text,
+      icon,
+    })
+    if (state.value.keyMoments.length > MAX_KEY_MOMENTS) {
+      state.value.keyMoments.shift()
+    }
+  }
+
+  function recordResourceSnapshot() {
+    const snapshot: ResourceSnapshot = {
+      turn: state.value.turn,
+      health: state.value.health,
+      hunger: state.value.hunger,
+      thirst: state.value.thirst,
+      wood: state.value.wood,
+      stone: state.value.stone,
+    }
+    state.value.resourceHistory.push(snapshot)
+  }
+
+  function detectKeyMoments(event: RandomEvent) {
+    const healthPercent = state.value.health / MAX_STAT
+    const hungerPercent = state.value.hunger / MAX_STAT
+    const thirstPercent = state.value.thirst / MAX_STAT
+
+    if (healthPercent <= 0.2 && healthPercent > 0) {
+      addKeyMoment('critical_health', `生命值危急，仅剩 ${Math.round(state.value.health)}`, '⚠️')
+    }
+    if (hungerPercent >= 0.8 && hungerPercent < 1) {
+      addKeyMoment('critical_hunger', `饥饿值告急，已达 ${Math.round(state.value.hunger)}`, '🍖')
+    }
+    if (thirstPercent >= 0.8 && thirstPercent < 1) {
+      addKeyMoment('critical_thirst', `口渴值告急，已达 ${Math.round(state.value.thirst)}`, '💧')
+    }
+
+    if (state.value.wood === 0 || state.value.stone === 0) {
+      const depleted = state.value.wood === 0 ? '木材' : '石头'
+      addKeyMoment('resource_depleted', `${depleted}已耗尽！`, '📦')
+    }
+
+    const totalEffect = Math.abs(event.effects.health || 0) + Math.abs(event.effects.hunger || 0) + Math.abs(event.effects.thirst || 0)
+    if (totalEffect >= 15) {
+      if (event.type === 'good') {
+        addKeyMoment('major_good_event', event.text, '🎁')
+      } else if (event.type === 'bad') {
+        addKeyMoment('major_bad_event', event.text, '💥')
+      }
+    }
+
+    if (state.value.turn % 10 === 0 && state.value.turn > 0) {
+      addKeyMoment('turn_milestone', `已生存 ${state.value.turn} 回合！`, '🏆')
+    }
+  }
+
+  function determineCauseOfDeath(): { cause: CauseOfDeath; text: string } {
+    if (state.value.health <= 0) {
+      const lastBadEvents = state.value.logs.filter(l => l.type === 'bad').slice(0, 3)
+      const lastEventText = lastBadEvents.length > 0 ? lastBadEvents[0].text : '未知伤害'
+      return { cause: 'health_zero', text: `生命值耗尽 - ${lastEventText}` }
+    }
+    if (state.value.hunger >= MAX_STAT) {
+      return { cause: 'hunger_max', text: '饥饿过度 - 太久没有吃东西了' }
+    }
+    if (state.value.thirst >= MAX_STAT) {
+      return { cause: 'thirst_max', text: '脱水而亡 - 太久没有喝水了' }
+    }
+    return { cause: 'health_zero', text: '未知原因' }
+  }
+
+  function generateGameSummary(): GameSummary {
+    const { cause, text } = determineCauseOfDeath()
+    return {
+      finalTurn: state.value.turn,
+      causeOfDeath: cause,
+      causeOfDeathText: text,
+      keyMoments: [...state.value.keyMoments],
+      resourceHistory: [...state.value.resourceHistory],
+      createdAt: Date.now(),
     }
   }
 
@@ -136,6 +257,9 @@ export function useGame() {
     const eventLogType = event.type === 'good' ? 'good' : event.type === 'bad' ? 'bad' : 'event'
     addLog(event.text, eventLogType)
 
+    recordResourceSnapshot()
+    detectKeyMoments(event)
+
     checkGameOver()
   }
 
@@ -165,8 +289,12 @@ export function useGame() {
       turn: 0,
       isGameOver: false,
       logs: [],
+      resourceHistory: [],
+      keyMoments: [],
     }
     logIdCounter = 0
+    keyMomentIdCounter = 0
+    currentGameSummary.value = null
     addLog('你醒来发现自己身处荒野中，需要想办法生存下去...', 'system')
   }
 
@@ -176,6 +304,8 @@ export function useGame() {
   return {
     state,
     highScore,
+    highScoreRecord,
+    currentGameSummary,
     canAct,
     canPerformAction,
     gatherWood,

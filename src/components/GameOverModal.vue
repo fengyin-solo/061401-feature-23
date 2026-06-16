@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import type { GameSummary } from '@/types/game'
+import GameSummaryComp from '@/components/GameSummary.vue'
+
 interface Props {
   show: boolean
   finalTurn: number
   highScore: number
   isNewRecord: boolean
+  summary: GameSummary | null
 }
 
 defineProps<Props>()
@@ -40,6 +44,10 @@ const emit = defineEmits<{
                   <span v-if="isNewRecord" class="text-sm ml-1">🏆 新纪录！</span>
                 </span>
               </div>
+            </div>
+
+            <div class="mb-6">
+              <GameSummaryComp :summary="summary" title="本局回顾" />
             </div>
 
             <button
