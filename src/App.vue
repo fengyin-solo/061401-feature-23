@@ -38,9 +38,9 @@ const isNewRecord = computed(() => state.value.turn >= highScore.value && state.
         </div>
       </div>
 
-      <div v-if="highScoreRecord?.summary" class="mb-8">
-        <div class="bg-game-card/60 backdrop-blur rounded-2xl p-6 border border-game-border">
-          <GameSummary :summary="highScoreRecord.summary" title="历史最佳纪录" :compact="true" />
+      <div class="mb-8 max-w-2xl mx-auto">
+        <div class="bg-game-card/60 backdrop-blur rounded-2xl p-5 border border-game-border">
+          <GameSummary :summary="highScoreRecord?.summary" title="🏆 历史最佳纪录" :compact="true" :show-empty="true" />
         </div>
       </div>
 

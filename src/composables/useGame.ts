@@ -69,9 +69,14 @@ export function useGame() {
   }
 
   function saveHighScore() {
-    if (!highScoreRecord.value || state.value.turn > highScoreRecord.value.turn) {
-      const summary = generateGameSummary()
-      currentGameSummary.value = summary
+    const summary = generateGameSummary()
+    currentGameSummary.value = summary
+
+    const currentRecord = highScoreRecord.value
+    const isNewRecord = !currentRecord || state.value.turn > currentRecord.turn
+    const isLegacyRecord = currentRecord?.summary?.keyMoments?.length === 0 && currentRecord?.summary?.causeOfDeathText?.includes('旧版记录')
+
+    if (isNewRecord || (isLegacyRecord && currentRecord && state.value.turn >= currentRecord.turn)) {
       highScoreRecord.value = {
         turn: state.value.turn,
         summary,
@@ -81,8 +86,6 @@ export function useGame() {
       } catch (e) {
         // ignore
       }
-    } else {
-      currentGameSummary.value = generateGameSummary()
     }
   }
 
@@ -134,36 +137,50 @@ export function useGame() {
     state.value.resourceHistory.push(snapshot)
   }
 
+  let lastHealthMomentTurn = -1
+  let lastHungerMomentTurn = -1
+  let lastThirstMomentTurn = -1
+
   function detectKeyMoments(event: RandomEvent) {
     const healthPercent = state.value.health / MAX_STAT
     const hungerPercent = state.value.hunger / MAX_STAT
     const thirstPercent = state.value.thirst / MAX_STAT
 
-    if (healthPercent <= 0.2 && healthPercent > 0) {
-      addKeyMoment('critical_health', `生命值危急，仅剩 ${Math.round(state.value.health)}`, '⚠️')
+    if (healthPercent <= 0.3 && healthPercent > 0 && state.value.turn - lastHealthMomentTurn >= 3) {
+      const level = healthPercent <= 0.15 ? '极度危险' : '危急'
+      addKeyMoment('critical_health', `生命值${level}，仅剩 ${Math.round(state.value.health)}`, '⚠️')
+      lastHealthMomentTurn = state.value.turn
     }
-    if (hungerPercent >= 0.8 && hungerPercent < 1) {
-      addKeyMoment('critical_hunger', `饥饿值告急，已达 ${Math.round(state.value.hunger)}`, '🍖')
+    if (hungerPercent >= 0.7 && hungerPercent < 1 && state.value.turn - lastHungerMomentTurn >= 3) {
+      const level = hungerPercent >= 0.9 ? '即将爆表' : '告急'
+      addKeyMoment('critical_hunger', `饥饿值${level}，已达 ${Math.round(state.value.hunger)}`, '🍖')
+      lastHungerMomentTurn = state.value.turn
     }
-    if (thirstPercent >= 0.8 && thirstPercent < 1) {
-      addKeyMoment('critical_thirst', `口渴值告急，已达 ${Math.round(state.value.thirst)}`, '💧')
+    if (thirstPercent >= 0.7 && thirstPercent < 1 && state.value.turn - lastThirstMomentTurn >= 3) {
+      const level = thirstPercent >= 0.9 ? '即将爆表' : '告急'
+      addKeyMoment('critical_thirst', `口渴值${level}，已达 ${Math.round(state.value.thirst)}`, '💧')
+      lastThirstMomentTurn = state.value.turn
     }
 
-    if (state.value.wood === 0 || state.value.stone === 0) {
-      const depleted = state.value.wood === 0 ? '木材' : '石头'
-      addKeyMoment('resource_depleted', `${depleted}已耗尽！`, '📦')
-    }
-
-    const totalEffect = Math.abs(event.effects.health || 0) + Math.abs(event.effects.hunger || 0) + Math.abs(event.effects.thirst || 0)
-    if (totalEffect >= 15) {
-      if (event.type === 'good') {
-        addKeyMoment('major_good_event', event.text, '🎁')
-      } else if (event.type === 'bad') {
-        addKeyMoment('major_bad_event', event.text, '💥')
+    if (event.type === 'good' && (event.effects.wood || event.effects.stone)) {
+      const gains: string[] = []
+      if (event.effects.wood && event.effects.wood > 0) gains.push(`木材+${event.effects.wood}`)
+      if (event.effects.stone && event.effects.stone > 0) gains.push(`石头+${event.effects.stone}`)
+      if (gains.length > 0) {
+        addKeyMoment('major_good_event', `${event.text}（${gains.join('，')}）`, '🎁')
+      }
+    } else {
+      const totalEffect = Math.abs(event.effects.health || 0) + Math.abs(event.effects.hunger || 0) + Math.abs(event.effects.thirst || 0)
+      if (totalEffect >= 12) {
+        if (event.type === 'good') {
+          addKeyMoment('major_good_event', event.text, '🎁')
+        } else if (event.type === 'bad') {
+          addKeyMoment('major_bad_event', event.text, '💥')
+        }
       }
     }
 
-    if (state.value.turn % 10 === 0 && state.value.turn > 0) {
+    if (state.value.turn % 5 === 0 && state.value.turn > 0) {
       addKeyMoment('turn_milestone', `已生存 ${state.value.turn} 回合！`, '🏆')
     }
   }
@@ -294,12 +311,17 @@ export function useGame() {
     }
     logIdCounter = 0
     keyMomentIdCounter = 0
+    lastHealthMomentTurn = -1
+    lastHungerMomentTurn = -1
+    lastThirstMomentTurn = -1
     currentGameSummary.value = null
     addLog('你醒来发现自己身处荒野中，需要想办法生存下去...', 'system')
+    recordResourceSnapshot()
   }
 
   loadHighScore()
   addLog('你醒来发现自己身处荒野中，需要想办法生存下去...', 'system')
+  recordResourceSnapshot()
 
   return {
     state,
